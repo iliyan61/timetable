@@ -6,15 +6,14 @@
   <title>Simple Weekly Timetable</title>
   <style>
     :root{--bg:#0b0d12;--ink:#e6edf3;--muted:#9aa4b2;--line:#1e2738;--card:#121621;--now:#ff4d4d;--next:#ffd34d}
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
     header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
     h1{margin:0;font-size:16px}
     .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     select,button{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer}
-    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    .wrap{max-width:1280px;margin:0 auto;padding:16px}
     .weekline{margin:0 0 10px 0;color:var(--muted)}
-    .cols{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+    .cols{display:grid;grid-template-columns:repeat(5,minmax(220px,1fr));gap:16px}
     .col{border:1px solid var(--line);border-radius:10px;padding:10px;position:relative}
     .day{font-weight:700;font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
     .todaydot{width:6px;height:6px;background:var(--now);border-radius:999px;display:inline-block}
@@ -28,20 +27,13 @@
     .cc{font-weight:700}
     .nowsep{height:2px;background:var(--now);border-radius:2px;margin:6px 0}
     .wklec{font-weight:800;font-size:15px;margin-top:6px;color:#dce3f1}
-
-    /* Status bars */
-    .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;
-      padding:20px 24px;margin:20px 0;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);
-      font-size:20px;font-weight:700}
-
-    /* Attendance chips */
-    .att{margin-top:6px}
-    .att .chip{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:12px}
-    .att .chip.ok{background:#11331b;border-color:#1f6f33;color:#bff3c8}
-    .att .chip.miss{background:#3a1414;border-color:#7a2e2e;color:#ffd1d1}
-    .att .chip.none{background:#1a1f2b;border-color:#394158;color:#b9c3d9}
+    .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:20px 0;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:20px;font-weight:700}
+  @media (max-width: 720px){
+    .cols{grid-template-columns:1fr}
+    .col{display:none}
+    .col.mobile-current{display:block}
+  }
   </style>
-  <!-- YAML parser -->
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
 <body>
@@ -52,9 +44,7 @@
       <select id="week"></select>
       <button id="next">▶</button>
       <button id="currentWeek">Current Week</button>
-      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--muted)">
-        <input id="override" type="checkbox" /> Override
-      </label>
+      <label style="display:flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--muted)"><input id="override" type="checkbox"/> Override</label>
     </div>
   </header>
 
@@ -66,243 +56,57 @@
   </div>
 
   <script>
-  // ===== Term (Weeks start Monday) =====
-  const WEEK2_MON = new Date(2025, 9, 6); // Mon 6 Oct 2025
-  const WEEKS = Array.from({length:11}, (_,i)=> i+2); // Weeks 2..12
+  const WEEK2_MON = new Date(2025, 9, 6);
+  const WEEKS = Array.from({length:11}, (_,i)=> i+2);
+  const pad2 = n => n.toString().padStart(2,'0');
+  const addDays = (d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+  const stripTime = d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
+  const weekStart = w=>addDays(WEEK2_MON,(w-2)*7);
+  const weekOf = d=>2+Math.floor((stripTime(d)-stripTime(WEEK2_MON))/(7*24*3600*1000));
+  const daysMap = {monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
 
-  // ===== Utilities =====
-  const pad2=n=>String(n).padStart(2,'0');
-  const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
-  const stripTime=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
-  const weekStart=w=>addDays(WEEK2_MON,(w-2)*7);
-  const weekOf=d=>2+Math.floor((stripTime(d)-stripTime(WEEK2_MON))/(7*24*3600*1000));
-  const daysMap={monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
+  let TEMPLATE=[]; let DATA=[];
+  const STORAGE_KEY='attendance_v1';
+  const attMap=new Map();
+  const getKey=(code,start)=>`${code}|${start.toISOString()}`;
+  const saveLocal=()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify(Object.fromEntries(attMap)));}catch(_){}};
+  const loadLocal=()=>{try{const raw=localStorage.getItem(STORAGE_KEY);if(raw){const obj=JSON.parse(raw);Object.entries(obj).forEach(([k,v])=>attMap.set(k,v));}}catch(_){}};
 
-  // ===== Data =====
-  let TEMPLATE=[]; // classes from YAML
-  let DATA=[];     // expanded per week
+  const ATTENDANCE={endpoint:"https://docs.google.com/forms/d/e/1FAIpQLSfvyGOa1oTO7IMoCwS7u0JglKPm_Cb7dMCkxlXM77F9NCNHXQ/formResponse",fields:{course:"entry.681754580",when:"entry.1108216594",status:"entry.806602048"}};
 
-  // ===== Attendance (Google Form) =====
-  const ATTENDANCE = {
-    endpoint: "https://docs.google.com/forms/d/e/1FAIpQLSfvyGOa1oTO7IMoCwS7u0JglKPm_Cb7dMCkxlXM77F9NCNHXQ/formResponse",
-    fields: { course: "entry.681754580", when: "entry.1108216594", status: "entry.806602048" }
-  };
-  const STORAGE_KEY = 'attendance_v1';
-  const attMap = new Map(); // key -> 'Present' | 'Absent'
-  const getKey = (code, start)=> `${code}|${start.toISOString()}`;
+  function toast(msg){const t=document.createElement('div');t.textContent=msg;Object.assign(t.style,{position:'fixed',bottom:'20px',left:'50%',transform:'translateX(-50%)',background:'#121621',border:'1px solid #1e2738',color:'#e6edf3',padding:'10px 14px',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,.25)',zIndex:9999});document.body.appendChild(t);setTimeout(()=>t.remove(),1500);}
 
-  const saveLocal = ()=>{ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(attMap))); }catch(_){} };
-  const loadLocal = ()=>{ try{ const raw=localStorage.getItem(STORAGE_KEY); if(raw){ const obj=JSON.parse(raw); Object.entries(obj).forEach(([k,v])=>attMap.set(k,v)); } }catch(_){} };
-
-  function toast(msg){
-    const t=document.createElement('div'); t.textContent=msg;
-    Object.assign(t.style,{position:'fixed',bottom:'20px',left:'50%',transform:'translateX(-50%)',
-      background:'#121621',border:'1px solid #1e2738',color:'#e6edf3',padding:'10px 14px',
-      borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,.25)',zIndex:9999});
-    document.body.appendChild(t); setTimeout(()=>t.remove(),1500);
-  }
-
-  // Write to Google Form + store locally
-  function logAttendance({ code, start, status }){
-    const form=new FormData();
-    form.set(ATTENDANCE.fields.course, code);
-    form.set(ATTENDANCE.fields.when, start.toISOString());
-    form.set(ATTENDANCE.fields.status, status);
+  function logAttendance({code,start,status}){
+    const form=new FormData();form.set(ATTENDANCE.fields.course,code);form.set(ATTENDANCE.fields.when,start.toISOString());form.set(ATTENDANCE.fields.status,status);
     fetch(ATTENDANCE.endpoint,{method:'POST',mode:'no-cors',body:form}).catch(()=>{});
-    attMap.set(getKey(code,start), status);
-    saveLocal();
-    toast('Attendance logged');
-    render();
+    attMap.set(getKey(code,start),status);saveLocal();toast('Attendance logged');render();
   }
 
-  // Optional: import published CSV for cross-device sync (?responses=CSV_URL)
-  function getQueryParam(name){ return new URLSearchParams(location.search).get(name); }
-  async function hydrateFromResponses(){
-    const url = getQueryParam('responses'); if(!url) return;
-    try{
-      const csv = await fetch(url, {cache:'no-store'}).then(r=>r.text());
-      const rows = csv.split(/\r?\n/).filter(Boolean)
-        .map(l=>l.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(s=>s.replace(/^"|"$|\r/g,'')));
-      const header = rows.shift()||[];
-      const ci = header.findIndex(h=>/course/i.test(h));
-      const wi = header.findIndex(h=>/when|time/i.test(h));
-      const si = header.findIndex(h=>/status/i.test(h));
-      rows.forEach(r=>{
-        if(ci>=0&&wi>=0&&si>=0){
-          const code=r[ci]; const when=new Date(r[wi]); const status=r[si];
-          if(code && when.toString()!=='Invalid Date' && (status==='Present'||status==='Absent')){
-            attMap.set(getKey(code, when), status);
-          }
-        }
-      });
-      saveLocal();
-    }catch(e){ console.warn('Could not import responses CSV', e); }
-  }
-
-  // ===== YAML loader =====
   async function loadYAML(){
     try{
-      const res = await fetch('classes.yaml',{cache:'no-store'});
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const text = await res.text();
-      const raw = jsyaml.load(text);
-      TEMPLATE = (Array.isArray(raw)?raw:[]).map(e=>({...e, day: daysMap[String(e.day||'').toLowerCase()]||1}));
-      if(TEMPLATE.length===0) throw new Error('No classes in YAML');
-
-      buildSchedule();
-      initUI();
-      render();
-      updateStatus();
-      setInterval(()=>{render();updateStatus();},60000);
-      document.getElementById('footerBar').textContent = 'Loaded ✓';
-    }catch(err){
-      console.error(err);
-      document.getElementById('footerBar').textContent = 'Could not load classes.yaml';
-    }
+      const res=await fetch('classes.yaml',{cache:'no-store'});const text=await res.text();const raw=jsyaml.load(text);
+      TEMPLATE=raw.map(e=>({...e,day:daysMap[e.day.toLowerCase()]||1}));buildSchedule();loadLocal();render();updateStatus();setInterval(()=>{render();updateStatus();},60000);document.getElementById('footerBar').textContent='Loaded ✓';
+    }catch(err){console.error(err);document.getElementById('footerBar').textContent='Could not load classes.yaml';}
   }
 
-  // ===== Build repeated weeks =====
-  function buildSchedule(){
-    DATA.length=0;
-    for(const w of WEEKS){
-      const mon=weekStart(w);
-      for(const t of TEMPLATE){
-        const dd=addDays(mon,t.day-1);
-        const s=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.start.slice(0,2),+t.start.slice(3));
-        const e=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.end.slice(0,2),+t.end.slice(3));
-        DATA.push({...t,start:s,end:e,week:w});
-      }
-    }
-    DATA.sort((a,b)=>a.start-b.start);
-  }
+  function buildSchedule(){DATA=[];for(const w of WEEKS){const mon=weekStart(w);for(const t of TEMPLATE){const dd=addDays(mon,t.day-1);const s=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.start.slice(0,2),+t.start.slice(3));const e=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.end.slice(0,2),+t.end.slice(3));DATA.push({...t,start:s,end:e,week:w});}}}
 
-  function cumulativeLectureNumbers(upto){
-    const list=DATA.filter(x=>x.week<=upto).sort((a,b)=>a.start-b.start);
-    const count=new Map(); const map=new WeakMap();
-    for(const it of list){const n=(count.get(it.code)||0)+1;count.set(it.code,n);map.set(it,n);}
-    return map;
-  }
-
-  // ===== UI =====
-  function initUI(){
-    const weekSel=document.getElementById('week');
-    weekSel.innerHTML=WEEKS.map(w=>{
-      const m=weekStart(w);
-      const label=m.toLocaleDateString([], {month:'short',day:'numeric'});
-      return `<option value="${w}">Week ${w} — ${label}</option>`;
-    }).join('');
-    const todayW=(()=>{const w=weekOf(new Date());return(w>=2&&w<=12)?w:2;})();
-    weekSel.value=todayW;
-
-    weekSel.addEventListener('change',render);
-    document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>2){weekSel.value=v-1;render();}});
-    document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<12){weekSel.value=v+1;render();}});
-    document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=2&&cw<=12){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (2–12).');}});
-    document.getElementById('override').addEventListener('change', render);
-  }
+  function cumulativeLectureNumbers(upto){const list=DATA.filter(x=>x.week<=upto).sort((a,b)=>a.start-b.start);const count=new Map();const map=new WeakMap();for(const it of list){const n=(count.get(it.code)||0)+1;count.set(it.code,n);map.set(it,n);}return map;}
 
   function render(){
-    const weekSel=document.getElementById('week');
-    const week=+weekSel.value||weekOf(new Date());
-    const mon=weekStart(week);
-    const sun=addDays(mon,6);
-    const now=new Date();
+    const weekSel=document.getElementById('week');const week=+weekSel.value||weekOf(new Date());const mon=weekStart(week);const sun=addDays(mon,6);const now=new Date();
+    const todayD = now.getDay();
     const isCurrentWeek=(week===weekOf(now));
-
+    const override=document.getElementById('override').checked;
     document.getElementById('wkInfo').textContent=`Week ${week} (${mon.toLocaleDateString()} – ${sun.toLocaleDateString()})`;
-    const cum=cumulativeLectureNumbers(week);
-    const titles=['Mon','Tue','Wed','Thu','Fri'];
-    const days=[1,2,3,4,5];
+    const cum=cumulativeLectureNumbers(week);const days=[1,2,3,4,5];const titles=['Mon','Tue','Wed','Thu','Fri'];const items=DATA.filter(x=>x.week===week).sort((a,b)=>a.start-b.start);const byDay=new Map(days.map(d=>[d,[]]));for(const it of items)byDay.get(it.day).push(it);const cols=document.getElementById('cols');cols.innerHTML=days.map((d,i)=>{const list=byDay.get(d);const isTodayCol=isCurrentWeek&&(new Date().getDay()===d);let pieces=[];let insertedSep=false;let markedNext=false;for(const it of list){const key=getKey(it.code,it.start);const status=attMap.get(key)||null;const ongoing=isTodayCol&&now>=it.start&&now<=it.end;const nextUp=isTodayCol&&!ongoing&&!markedNext&&now<it.start;if(nextUp)markedNext=true;const showButtons=(!status)||override;const buttonSection=showButtons?`<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button onclick="logAttendance({code:'${it.code}',start:new Date(${it.start.getTime()}),status:'Present'})">Mark present</button><button onclick="logAttendance({code:'${it.code}',start:new Date(${it.start.getTime()}),status:'Absent'})">Mark absent</button></div>`:'';pieces.push(`<div class='item ${ongoing?"now":""} ${nextUp?"next":""}'><div class='cc'>${it.code} - ${it.name}${ongoing?" <span class='badge now'>NOW</span>":nextUp?" <span class='badge next'>NEXT</span>":""}</div><div class='muted'>Room: ${it.room}</div><div class='muted'>${pad2(it.start.getHours())}:${pad2(it.start.getMinutes())}–${pad2(it.end.getHours())}:${pad2(it.end.getMinutes())}</div><div class='wklec'>Week ${week} · Lecture ${cum.get(it)}</div><div>${status?`Attendance: ${status}`:'Attendance: Unmarked'}</div>${buttonSection}</div>`);}if(isTodayCol&&!insertedSep){pieces=(list.length&&now>list[list.length-1].end)?pieces.concat([`<div class='nowsep'></div>`]):[`<div class='nowsep'></div>`].concat(pieces);}const header=isTodayCol?`<span class='todaydot' title='Today'></span> ${titles[i]}`:titles[i];const inner=pieces.join('')||`<div class='muted'>No classes</div>`;return `<div class='col ${d===todayD?"mobile-current":""}'><div class='day'>${header}</div>${inner}</div>`;}).join('');}
 
-    const items=DATA.filter(x=>x.week===week).sort((a,b)=>a.start-b.start);
-    const byDay=new Map(days.map(d=>[d,[]]));
-    for(const it of items) byDay.get(it.day).push(it);
+  function formatDelta(ms){const m=Math.round(ms/60000);if(m<=0)return'now';if(m<60)return`${m} min${m===1?'':'s'}`;const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`;}
+  function updateStatus(){const now=new Date();const ongoing=DATA.find(x=>now>=x.start&&now<=x.end);const bar=document.getElementById('statusBar');if(ongoing){const until=`${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;bar.textContent=`Now: ${ongoing.code} - ${ongoing.name} (until ${until}, Room ${ongoing.room})`;return;}const future=DATA.filter(x=>x.start>now).sort((a,b)=>a.start-b.start)[0];if(future){bar.textContent=`Next: ${future.code} - ${future.name} in ${formatDelta(future.start-now)} (Room ${future.room})`;}else{bar.textContent=`You're done — no upcoming classes in the timetable.`;}}
 
-    const cols=document.getElementById('cols');
-    const isFuture = (d)=> d>now && stripTime(d) >= stripTime(now);
+  const weekSel=document.getElementById('week');weekSel.innerHTML=WEEKS.map(w=>{const m=weekStart(w);const label=m.toLocaleDateString([], {month:'short',day:'numeric'});return `<option value="${w}">Week ${w} — ${label}</option>`;}).join('');weekSel.value=weekOf(new Date());weekSel.addEventListener('change',render);document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>2){weekSel.value=v-1;render();}});document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<12){weekSel.value=v+1;render();}});document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=2&&cw<=12){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (2–12).');}});document.getElementById('override').addEventListener('change',render);
 
-    cols.innerHTML=days.map((d,i)=>{
-      const list=byDay.get(d);
-      const isTodayCol=isCurrentWeek&&(new Date().getDay()===d);
-      let pieces=[]; let insertedSep=false; let markedNext=false;
-
-      for(const it of list){
-        const key = getKey(it.code, it.start);
-        const status = attMap.get(key) || null;
-        const future = isFuture(it.start);
-
-        if(isTodayCol && !insertedSep && now < it.start){ pieces.push(`<div class="nowsep"></div>`); insertedSep=true; }
-        const ongoing = isTodayCol && now >= it.start && now <= it.end;
-        const nextUp = isTodayCol && !ongoing && !markedNext && now < it.start; if(nextUp) markedNext=true;
-
-        const override = document.getElementById('override').checked;
-        const canMark = (!future) && (!status || override);
-        const disabledAttr = canMark ? '' : 'disabled';
-
-        const attChip = status
-          ? `<span class="chip ${status==='Present'?'ok':'miss'}">${status}</span>`
-          : `<span class="chip none">Unmarked</span>`;
-
-        pieces.push(`
-          <div class="item ${ongoing?'now':''} ${nextUp?'next':''}">
-            <div class="cc">${it.code} - ${it.name}
-              ${ongoing?'<span class="badge now">NOW</span>':(nextUp?'<span class="badge next">NEXT</span>':'')}
-            </div>
-            <div class="muted">Room: ${it.room}</div>
-            <div class="muted">${pad2(it.start.getHours())}:${pad2(it.start.getMinutes())}–${pad2(it.end.getHours())}:${pad2(it.end.getMinutes())}</div>
-            <div class="wklec">Week ${week} · Lecture ${cum.get(it)}</div>
-            <div class="att">Attendance: ${attChip}</div>
-            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-              <button ${disabledAttr} onclick="logAttendance({ code: '${it.code}', start: new Date(${it.start.getTime()}), status: 'Present' })">Mark present</button>
-              <button ${disabledAttr} onclick="logAttendance({ code: '${it.code}', start: new Date(${it.start.getTime()}), status: 'Absent' })">Mark absent</button>
-            </div>
-          </div>
-        `);
-      }
-
-      if(isTodayCol && !insertedSep){
-        pieces = (list.length && now > list[list.length-1].end)
-          ? pieces.concat([`<div class="nowsep"></div>`])
-          : [`<div class="nowsep"></div>`].concat(pieces);
-      }
-
-      const header = isTodayCol ? `<span class="todaydot" title="Today"></span> ${titles[i]}` : titles[i];
-      const inner = pieces.join('') || `<div class="muted">No classes</div>`;
-      return `<div class="col"><div class="day">${header}</div>${inner}</div>`;
-    }).join('');
-  }
-
-  function formatDelta(ms){
-    const m=Math.round(ms/60000);
-    if(m<=0) return 'now';
-    if(m<60) return `${m} min${m===1?'':'s'}`;
-    const h=Math.floor(m/60), r=m%60;
-    return r?`${h}h ${r}m`:`${h}h`;
-  }
-
-  function updateStatus(){
-    const now=new Date();
-    const ongoing=DATA.find(x=> now>=x.start && now<=x.end);
-    const bar=document.getElementById('statusBar');
-    if(ongoing){
-      const until=`${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;
-      bar.textContent=`Now: ${ongoing.code} - ${ongoing.name} (until ${until}, Room ${ongoing.room})`;
-      return;
-    }
-    const future=DATA.filter(x=> x.start>now).sort((a,b)=>a.start-b.start)[0];
-    if(future){
-      bar.textContent=`Next: ${future.code} - ${future.name} in ${formatDelta(future.start-now)} (Room ${future.room})`;
-    } else {
-      bar.textContent=`You're done — no upcoming classes in the timetable.`;
-    }
-  }
-
-  // ===== Boot =====
-  (async()=>{
-    loadLocal();
-    await hydrateFromResponses();
-    await loadYAML();
-  })();
+  loadYAML();
   </script>
 </body>
 </html>
