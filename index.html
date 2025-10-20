@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple Weekly Timetable (ICS)</title>
+  <style>
+    :root{--bg:#0b0d12;--ink:#e6edf3;--muted:#9aa4b2;--line:#1e2738;--card:#121621;--now:#ff4d4d;--next:#ffd34d}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    h1{margin:0;font-size:16px}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    select,button,input[type="url"]{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer}
+    input[type="url"]{min-width:420px}
+    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    .weekline{margin:0 0 10px 0;color:var(--muted)}
+    .cols{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+    .col{border:1px solid var(--line);border-radius:10px;padding:10px;position:relative}
+    .day{font-weight:700;font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .todaydot{width:6px;height:6px;background:var(--now);border-radius:999px;display:inline-block}
+    .item{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:10px;background:#0f1320}
+    .item.now{border-color:var(--now);box-shadow:0 0 0 1px var(--now) inset}
+    .item.next{border-color:#6b5d1a;box-shadow:0 0 0 1px #6b5d1a inset}
+    .badge{display:inline-block;font-size:11px;padding:2px 6px;border-radius:999px;margin-left:6px}
+    .badge.now{background:var(--now);color:#1a0b0b}
+    .badge.next{background:var(--next);color:#1a1a00}
+    .muted{color:var(--muted);font-size:12px}
+    .cc{font-weight:700}
+    .nowsep{height:2px;background:var(--now);border-radius:2px;margin:6px 0}
+    .wklec{font-weight:800;font-size:15px;margin-top:6px;color:#dce3f1}
+    .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:14px}
+    .hint{color:var(--muted);font-size:12px;margin-left:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Simple Weekly Timetable</h1>
+    <div class="controls">
+      <button id="prev">◀</button>
+      <select id="week"></select>
+      <button id="next">▶</button>
+      <button id="currentWeek">Current Week</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="statusbar" id="statusBar">—</div>
+
+    <div class="statusbar" id="statusBar">—</div>
+    <p class="weekline" id="wkInfo"></p>
+    <div class="cols" id="cols"></div>
+  </div>
+
+  <script>
+  // ====== Term boundaries ======
+  const WEEK2_MON = new Date(2025, 9, 6); // Mon 6 Oct 2025
+  const WEEKS = Array.from({length:11}, (_,i)=> i+2); // Week 2..12
+
+  // ====== Utilities ======
+  const pad2=n=>n.toString().padStart(2,'0');
+  const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+  const stripTime=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
+  const weekStart=w=>addDays(WEEK2_MON,(w-2)*7);
+  const weekOf=d=>2+Math.floor((stripTime(d)-stripTime(WEEK2_MON))/(7*24*3600*1000));
+  const localDate=(y,m,d,H=0,M=0)=>new Date(y,m,d,H,M);
+
+  // ====== Very small iCal parser (DT*, SUMMARY, LOCATION) ======
+  function parseICS(text){
+    const lines = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n").split("\n");
+    const events=[]; let cur=null; let inEvent=false;
+    // unfold folded lines
+    for(let i=1;i<lines.length;i++) if(/^\s/.test(lines[i])){ lines[i-1]+=lines[i].slice(1); lines[i]=''; }
+    for(const raw of lines){
+      const line = raw.trim(); if(!line) continue;
+      if(line==='BEGIN:VEVENT'){ cur={}; inEvent=true; continue; }
+      if(line==='END:VEVENT'){ if(cur.DTSTART && cur.DTEND && cur.SUMMARY){ events.push(cur); } cur=null; inEvent=false; continue; }
+      if(!inEvent) continue;
+      const idx=line.indexOf(':'); if(idx<0) continue; const key=line.slice(0,idx); const val=line.slice(idx+1);
+      if(key.startsWith('DTSTART')) cur.DTSTART = parseICSTime(key,val);
+      else if(key.startsWith('DTEND')) cur.DTEND = parseICSTime(key,val);
+      else if(key==='SUMMARY') cur.SUMMARY = val;
+      else if(key==='LOCATION') cur.LOCATION = val;
+      else if(key==='DESCRIPTION') cur.DESCRIPTION = val;
+    }
+    return events;
+  }
+  function parseICSTime(key,val){
+    // Support: YYYYMMDD, YYYYMMDDTHHMMSSZ, YYYYMMDDTHHMMSS, DTSTART;TZID=Europe/London:
+    const tzMatch = /TZID=([^:;]+)/.exec(key);
+    const tz = tzMatch ? tzMatch[1] : null; // unused (we assume localtime display)
+    if(/^[0-9]{8}$/.test(val)){
+      const y=+val.slice(0,4), m=+val.slice(4,6)-1, d=+val.slice(6,8);
+      return localDate(y,m,d);
+    }
+    if(/^[0-9]{8}T[0-9]{6}Z$/.test(val)){
+      const y=+val.slice(0,4), m=+val.slice(4,6)-1, d=+val.slice(6,8), H=+val.slice(9,11), M=+val.slice(11,13);
+      const dt = new Date(Date.UTC(y,m,d,H,M));
+      return localDate(dt.getFullYear(), dt.getMonth(), dt.getDate(), dt.getHours(), dt.getMinutes());
+    }
+    if(/^[0-9]{8}T[0-9]{6}$/.test(val)){
+      const y=+val.slice(0,4), m=+val.slice(4,6)-1, d=+val.slice(6,8), H=+val.slice(9,11), M=+val.slice(11,13);
+      return localDate(y,m,d,H,M);
+    }
+    return new Date(val); // fallback
+  }
+
+  // ====== Global data built from ICS ======
+  let DATA=[]; // { display:"GV103 - Intro to IR", code:"GV103", room:string, start:Date, end:Date, week:number, day:1..5 }
+
+  function buildFromICS(icsText){
+    const evts = parseICS(icsText);
+    const withinTerm = evts.filter(e=>{
+      const w = weekOf(e.DTSTART);
+      return w>=2 && w<=12 && e.DTSTART.getDay()>=1 && e.DTSTART.getDay()<=5;
+    });
+    DATA = withinTerm.map(e=>{
+      const summary = e.SUMMARY.trim();
+      // Try to extract a short code at the start (e.g., GV103); if not, use first token
+      const codeMatch = /(^[A-Za-z]{2,}\d{3,})/.exec(summary);
+      const code = codeMatch ? codeMatch[1] : summary.split(/\s|\-/)[0];
+      // Preferred display is the whole "GV103 - Intro to IR" if present
+      const display = summary.includes(' - ') ? summary.split('(')[0].trim() : summary;
+      const room = (e.LOCATION || '').trim() || extractRoomFromDescription(e.DESCRIPTION||'');
+      return {
+        display,
+        code,
+        room,
+        start: e.DTSTART,
+        end: e.DTEND,
+        week: weekOf(e.DTSTART),
+        day: e.DTSTART.getDay()
+      };
+    }).sort((a,b)=> a.start-b.start);
+  }
+  function extractRoomFromDescription(desc){
+    const m = /(Room|LTB|TC|\d+\.\d+|[A-Z]{1,3}\d(?:[\.\d]+)?)/i.exec(desc);
+    return m?m[0]:'';
+  }
+
+  // ====== Lecture numbering (cumulative per course code up to selected week) ======
+  function cumulativeLectureNumbers(upto){
+    const list = DATA.filter(x=>x.week<=upto).sort((a,b)=>a.start-b.start);
+    const count=new Map(), map=new WeakMap();
+    for(const it of list){const n=(count.get(it.code)||0)+1;count.set(it.code,n);map.set(it,n);}return map;
+  }
+
+  // ====== Populate week dropdown ======
+  const weekSel=document.getElementById('week');
+  weekSel.innerHTML=WEEKS.map(w=>{const m=weekStart(w);const label=m.toLocaleDateString([], {month:'short',day:'numeric'});return `<option value="${w}">Week ${w} — ${label}</option>`;}).join('');
+  const todayW=(()=>{const w=weekOf(new Date());return(w>=2&&w<=12)?w:2;})();
+  weekSel.value=todayW;
+
+  // ====== Render timetable ======
+  function render(){
+    const week=+weekSel.value;
+    const mon=weekStart(week), sun=addDays(mon,6); const now=new Date();
+    const isCurrentWeek=(week===weekOf(now));
+    document.getElementById('wkInfo').textContent=`Week ${week} (${mon.toLocaleDateString()} – ${sun.toLocaleDateString()})`;
+
+    const cum=cumulativeLectureNumbers(week);
+    const titles=['Mon','Tue','Wed','Thu','Fri'];
+    const days=[1,2,3,4,5];
+    const items=DATA.filter(x=>x.week===week).sort((a,b)=>a.start-b.start);
+    const byDay=new Map(days.map(d=>[d,[]])); for(const it of items) byDay.get(it.day).push(it);
+
+    const cols=document.getElementById('cols');
+    cols.innerHTML=days.map((d,i)=>{
+      const list=byDay.get(d);
+      const isTodayCol=isCurrentWeek && (new Date().getDay()===d);
+      let pieces=[]; let insertedSep=false; let markedNext=false;
+      for(const it of list){
+        if(isTodayCol && !insertedSep && now < it.start){ pieces.push(`<div class='nowsep'></div>`); insertedSep=true; }
+        const ongoing = isTodayCol && now >= it.start && now <= it.end;
+        const nextUp = isTodayCol && !ongoing && !markedNext && now < it.start;
+        if(nextUp) markedNext=true;
+        pieces.push(`<div class='item ${ongoing?"now":""} ${nextUp?"next":""}'>
+          <div class='cc'>${it.display}${ongoing?" <span class='badge now'>NOW</span>":nextUp?" <span class='badge next'>NEXT</span>":""}</div>
+          <div class='muted'>Room: ${it.room||'—'}</div>
+          <div class='muted'>${pad2(it.start.getHours())}:${pad2(it.start.getMinutes())}–${pad2(it.end.getHours())}:${pad2(it.end.getMinutes())}</div>
+          <div class='wklec'>Week ${week} · Lecture ${cum.get(it)}</div>
+        </div>`);
+      }
+      if(isTodayCol && !insertedSep){
+        pieces = (list.length && now > list[list.length-1].end) ? pieces.concat([`<div class='nowsep'></div>`]) : [`<div class='nowsep'></div>`].concat(pieces);
+      }
+      const header = isTodayCol ? `<span class='todaydot' title='Today'></span> ${titles[i]}` : titles[i];
+      const inner = pieces.join('') || `<div class='muted'>No classes</div>`;
+      return `<div class='col'><div class='day'>${header}</div>${inner}</div>`;
+    }).join('');
+  }
+
+  // ====== Status bar ======
+  function formatDelta(ms){ const m=Math.round(ms/60000); if(m<=0) return 'now'; if(m<60) return `${m} min${m===1?'':'s'}`; const h=Math.floor(m/60), r=m%60; return r?`${h}h ${r}m`:`${h}h`; }
+  function updateStatus(){
+    const now=new Date();
+    const ongoing = DATA.find(x=> now>=x.start && now<=x.end);
+    const bar=document.getElementById('statusBar');
+    if(ongoing){
+      const until = `${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;
+      bar.textContent = `Now: ${ongoing.display} (until ${until}, Room ${ongoing.room||'—'})`;
+      return;
+    }
+    const future = DATA.filter(x=> x.start>now).sort((a,b)=>a.start-b.start)[0];
+    if(future){ bar.textContent = `Next: ${future.display} in ${formatDelta(future.start-now)} (Room ${future.room||'—'})`; }
+    else { bar.textContent = `You're done — no upcoming classes in the timetable.`; }
+  }
+
+  // ====== Wire controls ======
+  function hydrate(){ render(); updateStatus(); }
+  weekSel.addEventListener('change',render);
+  document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>2){weekSel.value=v-1;render();}});
+  document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<12){weekSel.value=v+1;render();}});
+  document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=2&&cw<=12){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (2–12).');}});
+  setInterval(()=>{render();updateStatus();}, 60000);
+
+  // ====== Load ICS ======
+  function getQueryParam(name){return new URLSearchParams(location.search).get(name);} 
+  // Prefer ?ics=filename.ics (relative to this page). Fallback to timetable.ics
+  function resolveIcsUrl(){
+    const viaQuery = getQueryParam('ics');
+    if(viaQuery) return viaQuery; // relative or absolute
+    return 'timetable.ics';
+  }
+
+  async function loadICS(url){
+    const hintEl = document.getElementById('wkInfo');
+    try{
+      const res = await fetch(url, {cache:'no-store'});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const text = await res.text();
+      buildFromICS(text);
+      hydrate();
+      // show small hint once
+      hintEl.textContent = (hintEl.textContent||'') + '';
+    }catch(err){
+      console.error(err);
+      // Try common fallback names if the first one fails
+      const fallbacks = ['calendar.ics','schedule.ics'];
+      for(const f of fallbacks){
+        try{
+          const r = await fetch(f, {cache:'no-store'});
+          if(!r.ok) continue; const t = await r.text(); buildFromICS(t); hydrate(); return;
+        }catch(e){}
+      }
+      alert('Could not load .ics. Place a file named "timetable.ics" next to index.html, or pass ?ics=your.ics in the URL.');
+    }
+  }catch(err){
+      document.getElementById('loadHint').textContent = 'Could not load. If blocked by CORS, download the .ics file and drag it into this page.';
+      console.error(err);
+    }
+  }
+   const f=e.dataTransfer.files?.[0]; if(!f) return; const r=new FileReader();
+    r.onload=()=>{ buildFromICS(String(r.result)); hydrate(); document.getElementById('loadHint').textContent='Loaded from file ✓'; };
+    r.readAsText(f);
+  });
+
+  // Auto-load a relative .ics so GitHub Pages works with just index.html + .ics
+  loadICS(resolveIcsUrl());
+  </script>
+</body>
+</html>
