@@ -27,7 +27,7 @@
     .cc{font-weight:700}
     .nowsep{height:2px;background:var(--now);border-radius:2px;margin:6px 0}
     .wklec{font-weight:800;font-size:15px;margin-top:6px;color:#dce3f1}
-    .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:18px 0;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:14px}
+    .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:20px 0;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:20px;font-weight:700}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
@@ -43,9 +43,10 @@
   </header>
 
   <div class="wrap">
+    <div class="statusbar" id="statusBar">—</div>
     <p class="weekline" id="wkInfo"></p>
     <div class="cols" id="cols"></div>
-    <div class="statusbar" id="statusBar">Loading…</div>
+    <div class="statusbar" id="footerBar">Loading…</div>
   </div>
 
   <script>
@@ -70,10 +71,10 @@
       render();
       updateStatus();
       setInterval(()=>{render();updateStatus();},60000);
-      document.getElementById('statusBar').textContent = 'Loaded ✓';
+      document.getElementById('footerBar').textContent = 'Loaded ✓';
     }catch(err){
       console.error(err);
-      document.getElementById('statusBar').textContent = 'Could not load classes.yaml';
+      document.getElementById('footerBar').textContent = 'Could not load classes.yaml';
     }
   }
 
