@@ -1,0 +1,57 @@
+# === Example weekly schedule ===
+
+- code: GV103
+  name: Intro to IR
+  day: Monday
+  start: 09:00
+  end: 11:00
+  room: LTB02
+
+- code: GV110
+  name: TLASS
+  day: Monday
+  start: 14:00
+  end: 15:00
+  room: TC2.12+TC2.13
+
+- code: GV100
+  name: Intro to Pol
+  day: Monday
+  start: 17:00
+  end: 18:00
+  room: 5N.4.7
+
+- code: GV110
+  name: TLASS
+  day: Wednesday
+  start: 09:00
+  end: 10:00
+  room: CTC.2.02
+
+- code: GV711
+  name: Career Portfolio
+  day: Wednesday
+  start: 10:00
+  end: 11:00
+  room: LTB08
+
+- code: GV420
+  name: Challenges of Human Security
+  day: Thursday
+  start: 10:00
+  end: 12:00
+  room: 4.722
+
+- code: GV100
+  name: Intro to Pol
+  day: Thursday
+  start: 16:00
+  end: 17:00
+  room: LTB02
+
+- code: GV151
+  name: Auth and Morality
+  day: Friday
+  start: 09:00
+  end: 11:00
+  room: TC2.6+TC2.7
