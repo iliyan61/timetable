@@ -44,7 +44,11 @@
   </header>
 
   <div class="wrap">
-    <div class="statusbar" id="statusBar">—</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input id="icsUrl" type="url" placeholder="Calendar subscription URL (.ics)" />
+      <button id="loadBtn">Load calendar</button>
+      <span class="hint" id="loadHint">Paste your ICS URL and click Load. (Your URL is never uploaded anywhere—this runs in your browser.)</span>
+    </div>
 
     <div class="statusbar" id="statusBar">—</div>
     <p class="weekline" id="wkInfo"></p>
@@ -214,48 +218,39 @@
   setInterval(()=>{render();updateStatus();}, 60000);
 
   // ====== Load ICS ======
-  function getQueryParam(name){return new URLSearchParams(location.search).get(name);} 
-  // Prefer ?ics=filename.ics (relative to this page). Fallback to timetable.ics
-  function resolveIcsUrl(){
-    const viaQuery = getQueryParam('ics');
-    if(viaQuery) return viaQuery; // relative or absolute
-    return 'timetable.ics';
-  }
+  const DEFAULT_ICS = "https://outlook.office365.com/owa/calendar/7abf0edd4eae491ba867a1d7c10c4560%40essex.ac.uk/4cc9ce76d30545b79976af0e7528469c17923411799126371613/S-1-8-679385976-2641462445-1169276602-2411913512/reachcalendar.ics";
+  const urlInput = document.getElementById('icsUrl');
+  const loadBtn = document.getElementById('loadBtn');
+  urlInput.value = DEFAULT_ICS;
 
   async function loadICS(url){
-    const hintEl = document.getElementById('wkInfo');
+    document.getElementById('loadHint').textContent = 'Loading…';
     try{
-      const res = await fetch(url, {cache:'no-store'});
+      const res = await fetch(url);
       if(!res.ok) throw new Error('HTTP '+res.status);
       const text = await res.text();
       buildFromICS(text);
       hydrate();
-      // show small hint once
-      hintEl.textContent = (hintEl.textContent||'') + '';
+      document.getElementById('loadHint').textContent = 'Loaded ✓';
     }catch(err){
-      console.error(err);
-      // Try common fallback names if the first one fails
-      const fallbacks = ['calendar.ics','schedule.ics'];
-      for(const f of fallbacks){
-        try{
-          const r = await fetch(f, {cache:'no-store'});
-          if(!r.ok) continue; const t = await r.text(); buildFromICS(t); hydrate(); return;
-        }catch(e){}
-      }
-      alert('Could not load .ics. Place a file named "timetable.ics" next to index.html, or pass ?ics=your.ics in the URL.');
-    }
-  }catch(err){
       document.getElementById('loadHint').textContent = 'Could not load. If blocked by CORS, download the .ics file and drag it into this page.';
       console.error(err);
     }
   }
-   const f=e.dataTransfer.files?.[0]; if(!f) return; const r=new FileReader();
+  loadBtn.addEventListener('click',()=>{
+    const u = urlInput.value.trim(); if(u) loadICS(u);
+  });
+
+  // Drag/drop fallback for CORS
+  document.addEventListener('dragover',e=>{e.preventDefault()});
+  document.addEventListener('drop',e=>{
+    e.preventDefault(); const f=e.dataTransfer.files?.[0]; if(!f) return; const r=new FileReader();
     r.onload=()=>{ buildFromICS(String(r.result)); hydrate(); document.getElementById('loadHint').textContent='Loaded from file ✓'; };
     r.readAsText(f);
   });
 
-  // Auto-load a relative .ics so GitHub Pages works with just index.html + .ics
-  loadICS(resolveIcsUrl());
+  // Auto-load the default URL initially
+  loadICS(DEFAULT_ICS);
   </script>
 </body>
 </html>
