@@ -30,6 +30,7 @@
     .wklec{font-weight:800;font-size:15px;margin-top:6px;color:#dce3f1}
     .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:14px}
   </style>
+  <!-- YAML parser -->
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
 <body>
@@ -44,136 +45,210 @@
   </header>
 
   <div class="wrap">
-    <div class="statusbar" id="statusBar">—</div>
+    <div class="statusbar" id="statusBar">Loading…</div>
     <p class="weekline" id="wkInfo"></p>
     <div class="cols" id="cols"></div>
   </div>
 
   <script>
-  const WEEK2_MON = new Date(2025, 9, 6);
-  const WEEKS = Array.from({length:11}, (_,i)=> i+2);
-  const pad2 = n => n.toString().padStart(2,'0');
-  const addDays = (d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
-  const stripTime = d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
-  const weekStart = w=>addDays(WEEK2_MON,(w-2)*7);
-  const weekOf = d=>2+Math.floor((stripTime(d)-stripTime(WEEK2_MON))/(7*24*3600*1000));
-  const daysMap = {Monday:1,Tuesday:2,Wednesday:3,Thursday:4,Friday:5};
+  (function(){
+    // --- Term boundaries (Weeks start on Monday) ---
+    const WEEK2_MON = new Date(2025, 9, 6); // Mon 6 Oct 2025
+    const WEEKS = Array.from({length:11}, (_,i)=> i+2); // 2..12
 
-  let TEMPLATE = [];
-  let DATA = [];
+    // --- Utils ---
+    const pad2 = n => String(n).padStart(2,'0');
+    const addDays = (d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
+    const stripTime = d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
+    const weekStart = w=>addDays(WEEK2_MON,(w-2)*7);
+    const weekOf = d=>2+Math.floor((stripTime(d)-stripTime(WEEK2_MON))/(7*24*3600*1000));
+    const daysMap = {monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
+    const dayNames = ['Mon','Tue','Wed','Thu','Fri'];
 
-  async function loadYAML() {
-    try {
-      const res = await fetch('classes.yaml', { cache: 'no-store' });
-      const text = await res.text();
-      TEMPLATE = jsyaml.load(text).map(e => ({...e, day: daysMap[e.day]}));
-      buildSchedule();
-    } catch (err) {
-      console.error('Could not load classes.yaml', err);
-      document.getElementById('statusBar').textContent = 'Could not load classes.yaml';
-    }
-  }
+    let TEMPLATE = [];  // loaded from YAML
+    let DATA = [];      // expanded across weeks
+    let intervalId = null;
+    let listenersBound = false;
 
-  function buildSchedule(){
-    const weekSel=document.getElementById('week');
-    weekSel.innerHTML=WEEKS.map(w=>{const m=weekStart(w);const label=m.toLocaleDateString([], {month:'short',day:'numeric'});return `<option value=\"${w}\">Week ${w} — ${label}</option>`;}).join('');
-    const todayW=(()=>{const w=weekOf(new Date());return(w>=2&&w<=12)?w:2;})();
-    weekSel.value=todayW;
+    async function loadYAML(){
+      try{
+        const res = await fetch('classes.yaml', {cache:'no-store'});
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        const text = await res.text();
+        const raw = jsyaml.load(text);
 
-    DATA=[];
-    for(const w of WEEKS){
-      const mon=weekStart(w);
-      for(const t of TEMPLATE){
-        const dd=addDays(mon,t.day-1);
-        const s=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.start.slice(0,2),+t.start.slice(3));
-        const e=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.end.slice(0,2),+t.end.slice(3));
-        DATA.push({...t,start:s,end:e,week:w});
+        // Normalize + validate
+        TEMPLATE = (Array.isArray(raw)? raw : []).map(e=>{
+          const d = (e.day||'').toString().toLowerCase().trim();
+          const day = daysMap[d] || 1; // default Monday if typo
+          return {
+            code: String(e.code||''),
+            name: String(e.name||''),
+            day,
+            start: String(e.start||'00:00'),
+            end:   String(e.end||'00:00'),
+            room:  String(e.room||'')
+          };
+        });
+
+        if(TEMPLATE.length===0) throw new Error('No classes found');
+
+        initUI();
+        buildSchedule();
+        render();
+        updateStatus();
+        if(intervalId) clearInterval(intervalId);
+        intervalId = setInterval(()=>{ render(); updateStatus(); }, 60000);
+        document.getElementById('statusBar').textContent = 'Loaded ✓';
+      }catch(err){
+        console.error(err);
+        document.getElementById('statusBar').textContent = 'Could not load classes.yaml';
       }
     }
-    render();
-    updateStatus();
-    weekSel.addEventListener('change',render);
-    document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>2){weekSel.value=v-1;render();}});
-    document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<12){weekSel.value=v+1;render();}});
-    document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=2&&cw<=12){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (2–12).');}});
-    setInterval(()=>{render();updateStatus();},60000);
-  }
 
-  function cumulativeLectureNumbers(upto){
-    const list=DATA.filter(x=>x.week<=upto).sort((a,b)=>a.start-b.start);
-    const count=new Map();
-    const map=new WeakMap();
-    for(const it of list){const n=(count.get(it.code)||0)+1;count.set(it.code,n);map.set(it,n);}return map;
-  }
+    function initUI(){
+      const weekSel = document.getElementById('week');
+      weekSel.innerHTML = WEEKS.map(w=>{
+        const m = weekStart(w);
+        const label = m.toLocaleDateString([], {month:'short', day:'numeric'});
+        return `<option value="${w}">Week ${w} — ${label}</option>`;
+      }).join('');
+      const todayW = (()=>{
+        const w = weekOf(new Date());
+        return (w>=2 && w<=12) ? w : 2;
+      })();
+      weekSel.value = todayW;
 
-  function render(){
-    const week=+document.getElementById('week').value;
-    const mon=weekStart(week);
-    const sun=addDays(mon,6);
-    const now=new Date();
-    const isCurrentWeek=(week===weekOf(now));
+      if(!listenersBound){
+        listenersBound = true;
+        weekSel.addEventListener('change', render);
+        document.getElementById('prev').addEventListener('click', ()=>{
+          const v = +weekSel.value; if(v>2){ weekSel.value = v-1; render(); }
+        });
+        document.getElementById('next').addEventListener('click', ()=>{
+          const v = +weekSel.value; if(v<12){ weekSel.value = v+1; render(); }
+        });
+        document.getElementById('currentWeek').addEventListener('click', ()=>{
+          const cw = weekOf(new Date());
+          if(cw>=2 && cw<=12){ weekSel.value = cw; render(); }
+          else{ alert('Today is outside teaching weeks (2–12).'); }
+        });
+      }
+    }
 
-    document.getElementById('wkInfo').textContent=`Week ${week} (${mon.toLocaleDateString()} – ${sun.toLocaleDateString()})`;
-    const cum=cumulativeLectureNumbers(week);
-    const titles=['Mon','Tue','Wed','Thu','Fri'];
-    const days=[1,2,3,4,5];
-    const items=DATA.filter(x=>x.week===week).sort((a,b)=>a.start-b.start);
-    const byDay=new Map(days.map(d=>[d,[]]));for(const it of items)byDay.get(it.day).push(it);
-    const cols=document.getElementById('cols');
-    cols.innerHTML=days.map((d,i)=>{
-      const list=byDay.get(d);
-      const isTodayCol=isCurrentWeek && (new Date().getDay()===d);
-      let pieces=[]; let insertedSep=false; let markedNext=false;
+    function buildSchedule(){
+      DATA.length = 0;
+      for(const w of WEEKS){
+        const mon = weekStart(w);
+        for(const t of TEMPLATE){
+          const dd = addDays(mon, t.day-1);
+          const s = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate(),
+                             +t.start.slice(0,2), +t.start.slice(3,5));
+          const e = new Date(dd.getFullYear(), dd.getMonth(), dd.getDate(),
+                             +t.end.slice(0,2), +t.end.slice(3,5));
+          DATA.push({...t, start:s, end:e, week:w});
+        }
+      }
+      DATA.sort((a,b)=> a.start - b.start);
+    }
+
+    function cumulativeLectureNumbers(upto){
+      const list = DATA.filter(x=>x.week<=upto).sort((a,b)=>a.start-b.start);
+      const count = new Map();
+      const map = new WeakMap();
       for(const it of list){
-        if(isTodayCol && !insertedSep && now < it.start){ pieces.push(`<div class='nowsep'></div>`); insertedSep=true; }
-        const ongoing = isTodayCol && now >= it.start && now <= it.end;
-        const nextUp = isTodayCol && !ongoing && !markedNext && now < it.start;
-        if(nextUp) markedNext = true;
-        pieces.push(`<div class='item ${ongoing?\"now\":\"\"} ${nextUp?\"next\":\"\"}'>
-          <div class='cc'>${it.code} - ${it.name}${ongoing?\" <span class='badge now'>NOW</span>\":nextUp?\" <span class='badge next'>NEXT</span>\":\"\"}</div>
-          <div class='muted'>Room: ${it.room}</div>
-          <div class='muted'>${pad2(it.start.getHours())}:${pad2(it.start.getMinutes())}–${pad2(it.end.getHours())}:${pad2(it.end.getMinutes())}</div>
-          <div class='wklec'>Week ${week} · Lecture ${cum.get(it)}</div>
-        </div>`);
+        const n = (count.get(it.code)||0) + 1;
+        count.set(it.code, n);
+        map.set(it, n);
       }
-      if(isTodayCol && !insertedSep){
-        pieces = (list.length && now > list[list.length-1].end)
-          ? pieces.concat([`<div class='nowsep'></div>`])
-          : [`<div class='nowsep'></div>`].concat(pieces);
+      return map;
+    }
+
+    function render(){
+      const weekSel = document.getElementById('week');
+      const week = +weekSel.value;
+      const mon = weekStart(week);
+      const sun = addDays(mon, 6);
+      const now = new Date();
+      const isCurrentWeek = (week === weekOf(now));
+
+      document.getElementById('wkInfo').textContent =
+        `Week ${week} (${mon.toLocaleDateString()} – ${sun.toLocaleDateString()})`;
+
+      const cum = cumulativeLectureNumbers(week);
+      const items = DATA.filter(x=>x.week===week).sort((a,b)=>a.start-b.start);
+      const byDay = new Map([1,2,3,4,5].map(d=>[d,[]]));
+      for(const it of items){ byDay.get(it.day).push(it); }
+
+      const cols = document.getElementById('cols');
+      cols.innerHTML = [1,2,3,4,5].map((d,i)=>{
+        const list = byDay.get(d);
+        const isTodayCol = isCurrentWeek && (new Date().getDay()===d);
+
+        let pieces = [];
+        let insertedSep = false;
+        let markedNext = false;
+
+        for(const it of list){
+          if(isTodayCol && !insertedSep && now < it.start){
+            pieces.push(`<div class="nowsep"></div>`); insertedSep = true;
+          }
+          const ongoing = isTodayCol && now >= it.start && now <= it.end;
+          const nextUp = isTodayCol && !ongoing && !markedNext && now < it.start;
+          if(nextUp) markedNext = true;
+
+          pieces.push(`
+            <div class="item ${ongoing?'now':''} ${nextUp?'next':''}">
+              <div class="cc">
+                ${it.code} - ${it.name}
+                ${ongoing?'<span class="badge now">NOW</span>':(nextUp?'<span class="badge next">NEXT</span>':'')}
+              </div>
+              <div class="muted">Room: ${it.room}</div>
+              <div class="muted">${pad2(it.start.getHours())}:${pad2(it.start.getMinutes())}–${pad2(it.end.getHours())}:${pad2(it.end.getMinutes())}</div>
+              <div class="wklec">Week ${week} · Lecture ${cum.get(it)}</div>
+            </div>
+          `);
+        }
+
+        if(isTodayCol && !insertedSep){
+          pieces = (list.length && now > list[list.length-1].end)
+            ? pieces.concat([`<div class="nowsep"></div>`])
+            : [`<div class="nowsep"></div>`].concat(pieces);
+        }
+
+        const header = isTodayCol ? `<span class="todaydot" title="Today"></span> ${dayNames[i]}` : dayNames[i];
+        const inner = pieces.join('') || `<div class="muted">No classes</div>`;
+        return `<div class="col"><div class="day">${header}</div>${inner}</div>`;
+      }).join('');
+    }
+
+    function formatDelta(ms){
+      const m = Math.round(ms/60000);
+      if(m<=0) return 'now';
+      if(m<60) return `${m} min${m===1?'':'s'}`;
+      const h = Math.floor(m/60), r = m%60;
+      return r ? `${h}h ${r}m` : `${h}h`;
+    }
+
+    function updateStatus(){
+      const now = new Date();
+      const ongoing = DATA.find(x=> now>=x.start && now<=x.end);
+      const bar = document.getElementById('statusBar');
+      if(ongoing){
+        const until = `${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;
+        bar.textContent = `Now: ${ongoing.code} - ${ongoing.name} (until ${until}, Room ${ongoing.room})`;
+        return;
       }
-      const header = isTodayCol ? `<span class='todaydot' title='Today'></span> ${titles[i]}` : titles[i];
-      const inner = pieces.join('') || `<div class='muted'>No classes</div>`;
-      return `<div class='col'><div class='day'>${header}</div>${inner}</div>`;
-    }).join('');
-  }
-
-  function formatDelta(ms){
-    const m=Math.round(ms/60000);
-    if(m<=0) return 'now';
-    if(m<60) return `${m} min${m===1?'':'s'}`;
-    const h=Math.floor(m/60), r=m%60;
-    return r?`${h}h ${r}m`:`${h}h`;
-  }
-
-  function updateStatus(){
-    const now=new Date();
-    const inRange = DATA.filter(x=>x.week>=2 && x.week<=12);
-    const ongoing = inRange.find(x=> now>=x.start && now<=x.end);
-    const bar=document.getElementById('statusBar');
-    if(ongoing){
-      const until = `${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;
-      bar.textContent = `Now: ${ongoing.code} - ${ongoing.name} (until ${until}, Room ${ongoing.room})`;
-      return;
+      const future = DATA.filter(x=> x.start>now).sort((a,b)=>a.start-b.start)[0];
+      if(future){
+        bar.textContent = `Next: ${future.code} - ${future.name} in ${formatDelta(future.start-now)} (Room ${future.room})`;
+      } else {
+        bar.textContent = `You're done — no upcoming classes in the timetable.`;
+      }
     }
-    const future = inRange.filter(x=> x.start>now).sort((a,b)=>a.start-b.start)[0];
-    if(future){
-      bar.textContent = `Next: ${future.code} - ${future.name} in ${formatDelta(future.start-now)} (Room ${future.room})`;
-    } else {
-      bar.textContent = `You're done — no upcoming classes in the timetable.`;
-    }
-  }
 
-  loadYAML();
+    loadYAML();
+  })();
   </script>
 </body>
 </html>
