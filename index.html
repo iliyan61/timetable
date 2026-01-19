@@ -34,7 +34,7 @@
 </head>
 <body>
   <header>
-    <h1>Simple Weekly Timetable</h1>
+    <h1>Weekly Timetable</h1>
     <div class="controls">
       <button id="prev">◀</button>
       <select id="week"></select>
@@ -51,8 +51,8 @@
   </div>
 
   <script>
-  const WEEK16_MON=new Date(2026,0,12);const WEEKS=Array.from({length:27},(_,i)=>i+2);
-  const pad2=n=>n.toString().padStart(2,'0');const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};const stripTime=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();const weekStart=w=>addDays(WEEK16_MON,(w-16)*7);const weekOf=d=>2+Math.floor((stripTime(d)-stripTime(WEEK16_MON))/(7*24*3600*1000));const daysMap={monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
+  const WEEK16_MON=new Date(2026,0,12);const WEEKS=Array.from({length:27},(_,i)=>i+16);
+  const pad2=n=>n.toString().padStart(2,'0');const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};const stripTime=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();const weekStart=w=>addDays(WEEK16_MON,(w-16)*7);const weekOf=d=>16+Math.floor((stripTime(d)-stripTime(WEEK16_MON))/(7*24*3600*1000));const daysMap={monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
   let TEMPLATE=[];let DATA=[];
 
   async function loadYAML(){try{const res=await fetch('classes.yaml',{cache:'no-store'});const text=await res.text();const raw=jsyaml.load(text);TEMPLATE=raw.map(e=>({...e,day:daysMap[e.day.toLowerCase()]||1}));buildSchedule();render();updateStatus();setInterval(()=>{render();updateStatus();},60000);document.getElementById('footerBar').textContent='Loaded ✓';}catch(err){console.error(err);document.getElementById('footerBar').textContent='Could not load classes.yaml';}}
@@ -66,7 +66,7 @@
   function formatDelta(ms){const m=Math.round(ms/60000);if(m<=0)return'now';if(m<60)return`${m} min${m===1?'':'s'}`;const h=Math.floor(m/60),r=m%60;return r?`${h}h ${r}m`:`${h}h`;}
   function updateStatus(){const now=new Date();const cum=cumulativeLectureNumbers(42);const ongoing=DATA.find(x=>now>=x.start&&now<=x.end);const bar=document.getElementById('statusBar');if(ongoing){const until=`${pad2(ongoing.end.getHours())}:${pad2(ongoing.end.getMinutes())}`;bar.textContent=`Now: ${ongoing.code} - ${ongoing.name} (until ${until}, Room ${ongoing.room}) (Week ${ongoing.week} Lecture ${cum.get(ongoing)})`;return;}const future=DATA.filter(x=>x.start>now).sort((a,b)=>a.start-b.start)[0];if(future){bar.textContent=`Next: ${future.code} - ${future.name} in ${formatDelta(future.start-now)} (Room ${future.room}) (Week ${future.week} Lecture ${cum.get(future)})`;}else{bar.textContent=`You're done — no upcoming classes in the timetable.`;}}
 
-  const weekSel=document.getElementById('week');weekSel.innerHTML=WEEKS.map(w=>{const m=weekStart(w);const label=m.toLocaleDateString([], {month:'short',day:'numeric'});return `<option value='${w}'>Week ${w} — ${label}</option>`;}).join('');weekSel.value=weekOf(new Date());weekSel.addEventListener('change',render);document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>2){weekSel.value=v-1;render();}});document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<12){weekSel.value=v+1;render();}});document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=2&&cw<=12){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (16–42).');}});
+  const weekSel=document.getElementById('week');weekSel.innerHTML=WEEKS.map(w=>{const m=weekStart(w);const label=m.toLocaleDateString([], {month:'short',day:'numeric'});return `<option value='${w}'>Week ${w} — ${label}</option>`;}).join('');weekSel.value=weekOf(new Date());weekSel.addEventListener('change',render);document.getElementById('prev').addEventListener('click',()=>{const v=+weekSel.value;if(v>16){weekSel.value=v-1;render();}});document.getElementById('next').addEventListener('click',()=>{const v=+weekSel.value;if(v<42){weekSel.value=v+1;render();}});document.getElementById('currentWeek').addEventListener('click',()=>{const cw=weekOf(new Date());if(cw>=16&&cw<=42){weekSel.value=cw;render();}else{alert('Today is outside teaching weeks (16–42).');}});
 
   loadYAML();
   </script>
