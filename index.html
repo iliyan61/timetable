@@ -13,7 +13,7 @@
     select,button{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer}
     .wrap{max-width:1280px;margin:0 auto;padding:16px}
     .weekline{margin:0 0 10px 0;color:var(--muted)}
-    .cols{display:grid;grid-template-columns:repeat(5,minmax(240px,1fr));gap:16px}
+    .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
     .col{border:1px solid var(--line);border-radius:10px;padding:10px;position:relative}
     .day{font-weight:700;font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
     .todaydot{width:6px;height:6px;background:var(--now);border-radius:999px;display:inline-block}
@@ -28,7 +28,7 @@
     .nowsep{height:2px;background:var(--now);border-radius:2px;margin:6px 0}
     .wklec{font-weight:800;font-size:15px;margin-top:6px;color:#dce3f1}
     .statusbar{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:20px 0;color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,0.25);font-size:20px;font-weight:700}
-    @media (max-width: 720px){.cols{grid-template-columns:1fr}.col{display:none}.col.mobile-current{display:block}}
+    @media (max-width: 720px){.cols{grid-template-columns:1fr}}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
@@ -47,7 +47,6 @@
     <div class="statusbar" id="statusBar">—</div>
     <p class="weekline" id="wkInfo"></p>
     <div class="cols" id="cols"></div>
-    <div class="statusbar" id="footerBar">Loading…</div>
   </div>
 
   <script>
@@ -55,7 +54,7 @@
   const pad2=n=>n.toString().padStart(2,'0');const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};const stripTime=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();const weekStart=w=>addDays(WEEK16_MON,(w-16)*7);const weekOf=d=>16+Math.floor((stripTime(d)-stripTime(WEEK16_MON))/(7*24*3600*1000));const daysMap={monday:1,tuesday:2,wednesday:3,thursday:4,friday:5};
   let TEMPLATE=[];let DATA=[];
 
-  async function loadYAML(){try{const res=await fetch('classes.yaml',{cache:'no-store'});const text=await res.text();const raw=jsyaml.load(text);TEMPLATE=raw.map(e=>({...e,day:daysMap[e.day.toLowerCase()]||1}));buildSchedule();render();updateStatus();setInterval(()=>{render();updateStatus();},60000);document.getElementById('footerBar').textContent='Loaded ✓';}catch(err){console.error(err);document.getElementById('footerBar').textContent='Could not load classes.yaml';}}
+  async function loadYAML(){try{const res=await fetch('classes.yaml',{cache:'no-store'});const text=await res.text();const raw=jsyaml.load(text);TEMPLATE=raw.map(e=>({...e,day:daysMap[e.day.toLowerCase()]||1}));buildSchedule();render();updateStatus();setInterval(()=>{render();updateStatus();},60000);}catch(err){console.error(err);}}
 
   function buildSchedule(){DATA=[];for(const w of WEEKS){const mon=weekStart(w);for(const t of TEMPLATE){const dd=addDays(mon,t.day-1);const s=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.start.slice(0,2),+t.start.slice(3));const e=new Date(dd.getFullYear(),dd.getMonth(),dd.getDate(),+t.end.slice(0,2),+t.end.slice(3));DATA.push({...t,start:s,end:e,week:w});}}}
 
